@@ -27,7 +27,7 @@ function record(ts::FixedRepeatingTestSet, t::Union{BaseTestNext.Fail,BaseTestNe
     print(t)
     # don't print the backtrace for Errors because it gets printed in the show
     # method
-    isa(t, Error) || Base.show_backtrace(STDOUT, backtrace())
+    isa(t, BaseTestNext.Error) || Base.show_backtrace(STDOUT, backtrace())
     println()
     push!(ts.results, t)
     t
@@ -85,4 +85,11 @@ end
   #@testset "Set 1.1 nested" begin
   #  @test (f(a)+1) == 1
   #end
+
+  # A better example is to find some rare bug with random generation of test data.
+  # Here we seed a bug to ensure there is one...
+  myreverse(v) = length(v) > 1 ? reverse(v) : [1] # Bug happens only if length is 0
+  len = rand(0:5) # This might not be found if only one repetition of test...
+  v = randn(len)
+  @test length(myreverse(v)) == length(v)
 end
