@@ -226,9 +226,12 @@ end
 
 #-----------------------------------------------------------------------
 
-# The AbstractTestSet interface is defined by two methods:
+# The AbstractTestSet interface is defined by three methods:
 # record(AbstractTestSet, Result)
 #   Called by do_test after a test is evaluated
+# start(AbstractTestSet)
+#   Called after the test set has been added to the test set stack and when
+#     it's test is about to run.
 # finish(AbstractTestSet)
 #   Called after the test set has been popped from the test set stack
 abstract AbstractTestSet
@@ -242,6 +245,23 @@ test result (which could be an `Error`). This will also be called with an `Error
 if an exception is thrown inside the test block but outside of a `@test` context.
 """
 function record end
+
+"""
+    start(ts::AbstractTestSet, iteration::Int)
+
+Do any setup processing for the given testset. This is called by the 
+`@testset` infrastructure before a test block executes with an iterations arg that
+indicates the number of times the test block has been executed. One common use for this
+function is to record the starting time for timing of testing. Its return value
+indicates if the test block should be run or not.
+"""
+function start(ts::AbstractTestSet, iterations::Int)
+    if iterations < 1
+        BaseTestNext.RunTests
+    else
+        BaseTestNext.DontRunTests # Default is to only run once, i.e. not when larger than 0
+    end
+end
 
 """
     finish(ts::AbstractTestSet)
@@ -291,6 +311,7 @@ function record(ts::FallbackTestSet, t::Union{Fail,Error})
 end
 # We don't need to do anything as we don't record anything
 finish(ts::FallbackTestSet) = ts
+start(ts::FallbackTestSet) = ts
 
 #-----------------------------------------------------------------------
 
@@ -527,6 +548,10 @@ macro testset(args...)
     end
 end
 
+abstract TestAction # To collect all the test action singleton types.
+type RunTests <: TestAction; end # singleton that indicates one more execution of the test block of a test set
+type DontRunTests <: TestAction; end # singleton that indicates no more execution of the test block of a test set
+
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
@@ -547,19 +572,22 @@ function testset_beginend(args, tests)
     # action (such as reporting the results)
     quote
         ts = $(testsettype)($desc; $options...)
-        push_testset(ts)
-        try
-            $(esc(tests))
-        catch err
-            # something in the test block threw an error. Count that as an
-            # error in this test set
-            record(ts, Error(:nontest_error, :(), err, catch_backtrace()))
+        iters = 0
+        while start(ts, iters) == BaseTestNext.RunTests
+            push_testset(ts)
+            try
+                $(esc(tests))
+            catch err
+                # something in the test block threw an error. Count that as an
+                # error in this test set
+                record(ts, Error(:nontest_error, :(), err, catch_backtrace()))
+            end
+            pop_testset()
+            iters += 1
+            finish(ts)
         end
-        pop_testset()
-        finish(ts)
     end
 end
-
 
 """
 Generate the code for a `@testset` with a `for` loop argument
@@ -601,16 +629,20 @@ function testset_forloop(args, testloop)
     tests = testloop.args[2]
     blk = quote
         ts = $(testsettype)($desc; $options...)
-        push_testset(ts)
-        try
-            $(esc(tests))
-        catch err
-            # something in the test block threw an error. Count that as an
-            # error in this test set
-            record(ts, Error(:nontest_error, :(), err, catch_backtrace()))
+        iters = 0
+        while start(ts, iters) == BaseTestNext.RunTests
+            push_testset(ts)
+            try
+                $(esc(tests))
+            catch err
+                # something in the test block threw an error. Count that as an
+                # error in this test set
+                record(ts, Error(:nontest_error, :(), err, catch_backtrace()))
+            end
+            pop_testset()
+            iters += 1
+            finish(ts)
         end
-        pop_testset()
-        finish(ts)
     end
     Expr(:comprehension, blk, [esc(v) for v in loopvars]...)
 end
