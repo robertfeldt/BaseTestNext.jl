@@ -10,11 +10,10 @@ end
 type FixedRepeatingTestSet <: BaseTestNext.AbstractTestSet
     description::AbstractString
     results::Vector
-    anynonpass::Bool
     nextiter::Int64
     starttime::Float64
 end
-FixedRepeatingTestSet(desc) = FixedRepeatingTestSet(desc, [], false, -1, 0.0)
+FixedRepeatingTestSet(desc) = FixedRepeatingTestSet(desc, [], -1, 0.0)
 
 import BaseTestNext.record
 # For a passing result, simply store the result
@@ -76,8 +75,10 @@ function finish(ts::FixedRepeatingTestSet)
     ts
 end
 
-#@testset FixedRepeatingTestSet "Set 1" begin
-@testset "Set 1" begin
+# Now either use our custom, repeating test set:
+@testset FixedRepeatingTestSet "Set 1" begin
+# or the default test set:
+#@testset "Set 1" begin
   f(x) = x+1
   a = 1
   @test f(0) == a
