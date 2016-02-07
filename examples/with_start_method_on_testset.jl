@@ -11,11 +11,10 @@ type FixedRepeatingTestSet <: BaseTestNext.AbstractTestSet
     description::AbstractString
     results::Vector
     anynonpass::Bool
-    initer::Int64
+    nextiter::Int64
     starttime::Float64
-    laststoptime::Float64
 end
-FixedRepeatingTestSet(desc) = FixedRepeatingTestSet(desc, [], false, -1, 0.0, 0.0)
+FixedRepeatingTestSet(desc) = FixedRepeatingTestSet(desc, [], false, -1, 0.0)
 
 import BaseTestNext.record
 # For a passing result, simply store the result
@@ -40,16 +39,16 @@ record(ts::FixedRepeatingTestSet, t::BaseTestNext.AbstractTestSet) = push!(ts.re
 
 # Continue running tests 30 times. Save the start time if this is the first iteration.
 import BaseTestNext.start
-function start(ts::FixedRepeatingTestSet, iterations::Int)
-    ts.initer = iterations
-    if iterations < 1
+function start(ts::FixedRepeatingTestSet, nruns::Int)
+    ts.nextiter = nruns+1
+    if nruns < 1
       ts.starttime = time()
     end
-    if iterations < 30
-        println("Starting iteration $(iterations)!")
-        BaseTestNext.RunTests
+    if nruns < 30
+        println("Starting iteration $(ts.nextiter)!")
+        return true  # Should still run since not reached 30 yet
     else
-        BaseTestNext.DontRunTests # Default is to only run once, i.e. not when larger than 0
+        return false
     end
 end
 
@@ -57,7 +56,7 @@ end
 # this is a child of another testset, or the "root" testset
 import BaseTestNext.finish
 function finish(ts::FixedRepeatingTestSet)
-    ts.laststoptime = time()
+    elapsed = time() - ts.starttime
     # If we are a nested test set, do not print a full summary
     # now - let the parent test set do the printing
     if BaseTestNext.get_testset_depth() != 0
@@ -67,18 +66,18 @@ function finish(ts::FixedRepeatingTestSet)
         return
     end
 
-    numfinished = ts.initer+1
-    if numfinished >= 30
-      elapsed_time = ts.laststoptime - ts.starttime
-      println("Executed the test block $(numfinished) times in $(elapsed_time) seconds")
-      println(@sprintf("  %.2f test results/sec", length(ts.results)/elapsed_time))
+    numiters = ts.nextiter-1
+    if numiters >= 30
+      println("Executed the test block $(numiters) times in $(elapsed) seconds")
+      println(@sprintf("  %.2f tests/sec", length(ts.results)/elapsed))
     end
 
     # return the testset so it is returned from the @testset macro
     ts
 end
 
-@testset FixedRepeatingTestSet "Set 1" begin
+#@testset FixedRepeatingTestSet "Set 1" begin
+@testset "Set 1" begin
   f(x) = x+1
   a = 1
   @test f(0) == a

@@ -247,20 +247,16 @@ if an exception is thrown inside the test block but outside of a `@test` context
 function record end
 
 """
-    start(ts::AbstractTestSet, iteration::Int)
+    start(ts::AbstractTestSet, nruns::Int)
 
-Do any setup processing for the given testset. This is called by the 
-`@testset` infrastructure before a test block executes with an iterations arg that
-indicates the number of times the test block has been executed. One common use for this
+Do any setup processing for the given testset before running tests. This is called 
+by the `@testset` infrastructure before a test block executes. The `nruns` arg
+counts the number of times the test block has been executed. One common use for this
 function is to record the starting time for timing of testing. Its return value
 indicates if the test block should be run or not.
 """
-function start(ts::AbstractTestSet, iterations::Int)
-    if iterations < 1
-        BaseTestNext.RunTests
-    else
-        BaseTestNext.DontRunTests # Default is to only run once, i.e. not when larger than 0
-    end
+function start(ts::AbstractTestSet, nruns::Int)
+    nruns < 1 # Default is to only run tests once
 end
 
 """
@@ -326,8 +322,9 @@ type DefaultTestSet <: AbstractTestSet
     description::AbstractString
     results::Vector
     anynonpass::Bool
+    starttime::Float64
 end
-DefaultTestSet(desc) = DefaultTestSet(desc, [], false)
+DefaultTestSet(desc) = DefaultTestSet(desc, [], false, -1.0)
 
 # For a passing result, simply store the result
 record(ts::DefaultTestSet, t::Pass) = (push!(ts.results, t); t)
@@ -349,9 +346,21 @@ end
 # the results at the end of the tests
 record(ts::DefaultTestSet, t::AbstractTestSet) = push!(ts.results, t)
 
+# The first time a DefaultTestSet starts it will record the start time
+# so that it can later calculate the elapsed time.
+function start(ts::DefaultTestSet, nruns::Int)
+    if nruns < 1
+        ts.starttime = time()
+        return true
+    end
+    return false # We only run tests once
+end
+
 # Called at the end of a @testset, behaviour depends on whether
 # this is a child of another testset, or the "root" testset
 function finish(ts::DefaultTestSet)
+    elapsed = time() - ts.starttime
+
     # If we are a nested test set, do not print a full summary
     # now - let the parent test set do the printing
     if get_testset_depth() != 0
@@ -401,6 +410,8 @@ function finish(ts::DefaultTestSet)
     println()
     # Recursively print a summary at every level
     print_counts(ts, 0, align, pass_width, fail_width, error_width, total_width)
+    # Print total count of executed tests and timing info
+    println(@sprintf("\nExecuted %d tests in %.3f sec (%.2f tests/sec)", total, elapsed, total/elapsed))
     # Finally throw an error as we are the outermost test set
     if total != total_pass
         throw(TestSetException(total_pass,total_fail,total_error))
@@ -568,13 +579,13 @@ function testset_beginend(args, tests)
 
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
-    # finally removing the testset and giving it a change to take
+    # finally removing the testset and giving it a chance to take
     # action (such as reporting the results)
     quote
         ts = $(testsettype)($desc; $options...)
-        iters = 0
-        while start(ts, iters) == BaseTestNext.RunTests
-            push_testset(ts)
+        push_testset(ts)
+        nruns = 0
+        while start(ts, nruns) == true
             try
                 $(esc(tests))
             catch err
@@ -582,10 +593,10 @@ function testset_beginend(args, tests)
                 # error in this test set
                 record(ts, Error(:nontest_error, :(), err, catch_backtrace()))
             end
-            pop_testset()
-            iters += 1
-            finish(ts)
+            nruns += 1
         end
+        pop_testset()
+        finish(ts)
     end
 end
 
@@ -629,9 +640,9 @@ function testset_forloop(args, testloop)
     tests = testloop.args[2]
     blk = quote
         ts = $(testsettype)($desc; $options...)
-        iters = 0
-        while start(ts, iters) == BaseTestNext.RunTests
-            push_testset(ts)
+        push_testset(ts)
+        nruns = 0
+        while start(ts, nruns) == true
             try
                 $(esc(tests))
             catch err
@@ -639,10 +650,10 @@ function testset_forloop(args, testloop)
                 # error in this test set
                 record(ts, Error(:nontest_error, :(), err, catch_backtrace()))
             end
-            pop_testset()
-            iters += 1
-            finish(ts)
+            nruns += 1
         end
+        pop_testset()
+        finish(ts)
     end
     Expr(:comprehension, blk, [esc(v) for v in loopvars]...)
 end
